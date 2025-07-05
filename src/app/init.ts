@@ -78,7 +78,7 @@ export async function init() {
                             fs.copyFileSync(modemPath, backupPath);
                             logger.info('Original modem.js backed up.');
                         } catch (backupError) {
-                            logger.warn('Failed to backup original modem.js:', backupError);
+                            logger.warn('Failed to backup original modem.js');
                         }
                     }
 
