@@ -1,5 +1,6 @@
 import path from 'path';
 import fs from 'fs/promises';
+import * as fsd from 'fs';
 import fsN from 'fs';
 import axios from 'axios';
 import fileSpecifier from '../../utils/fileSpecifier';
@@ -16,21 +17,52 @@ const sanitizePath = (base: string, relativePath: string): string => {
 
 const requestCache = new Map();
 
-const getDirectorySize = async (directory: string): Promise<number> => {
-    const contents = await fs.readdir(directory, { withFileTypes: true });
-    let totalSize = 0;
+const getDirectorySize = async (
+  directory: string,
+  depth: number = 0,
+  maxDepth: number = 20
+): Promise<number> => {
+  let totalSize = 0;
 
-    for (const dirent of contents) {
-        const fullPath = path.join(directory, dirent.name);
-        if (dirent.isDirectory()) {
-            totalSize += await getDirectorySize(fullPath);
-        } else {
-            const stats = await fs.stat(fullPath);
-            totalSize += stats.size;
-        }
+  if (depth > maxDepth) {
+    console.warn(`Max depth reached at: ${directory}`);
+    return totalSize;
+  }
+
+  let contents: fsd.Dirent[];
+
+  try {
+    contents = await fs.readdir(directory, { withFileTypes: true });
+  } catch (err) {
+    console.warn(`Failed to read directory: ${directory}`, err);
+    return totalSize;
+  }
+
+  for (const dirent of contents) {
+    const fullPath = path.join(directory, dirent.name);
+
+    if (dirent.name === 'node_modules') {
+      continue;
     }
 
-    return totalSize;
+    try {
+      const stat = await fs.lstat(fullPath);
+
+      if (stat.isSymbolicLink()) {
+        continue;
+      }
+
+      if (stat.isDirectory()) {
+        totalSize += await getDirectorySize(fullPath, depth + 1, maxDepth);
+      } else {
+        totalSize += stat.size;
+      }
+    } catch (err) {
+      console.warn(`Failed to process ${fullPath}`, err);
+    }
+  }
+
+  return totalSize;
 };
 
 const getFileSize = async (filePath: string): Promise<number> => {
