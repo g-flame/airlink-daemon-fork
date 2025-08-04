@@ -10,6 +10,8 @@ import { deleteContainerAndVolume } from '../handlers/instances/delete';
 import { sendCommandToContainer } from '../handlers/instances/command';
 import fs from 'fs';
 import path from 'path';
+import { v4 as uuidv4 } from 'uuid';
+import { create as tar_create, extract as tar_extract } from 'tar';
 
 const loadJson = (filePath: string) => {
     try {
@@ -337,6 +339,189 @@ router.get('/container/stats', async (req: Request, res: Response) => {
     } catch (error) {
         console.error(`Error getting container stats: ${error}`);
         res.status(500).json({ error: `Failed to get stats for container ${id}.` });
+    }
+});
+
+router.post('/container/backup', async (req: Request, res: Response) => {
+    const { id, name } = req.body;
+
+    if (!id) {
+        res.status(400).json({ error: 'Container ID is required.' });
+        return;
+    }
+
+    if (!name) {
+        res.status(400).json({ error: 'Backup name is required.' });
+        return;
+    }
+
+    try {
+        const volumePath = path.resolve(`volumes/${id}`);
+
+        if (!fs.existsSync(volumePath)) {
+            res.status(404).json({ error: 'Container volume not found.' });
+            return;
+        }
+
+        const backupsDir = path.resolve('backups', id);
+        if (!fs.existsSync(backupsDir)) {
+            fs.mkdirSync(backupsDir, { recursive: true });
+        }
+
+        const backupUuid = uuidv4();
+        const backupFileName = `${backupUuid}.tar.gz`;
+        const backupPath = path.join(backupsDir, backupFileName);
+
+        console.log(`Creating backup for container ${id} at ${backupPath}`);
+
+            await tar_create({
+            gzip: true,
+            file: backupPath,
+            cwd: volumePath,
+            }, ['.']);
+
+        const stats = fs.statSync(backupPath);
+        const fileSizeInBytes = stats.size;
+
+        console.log(`Backup created successfully: ${backupPath} (${fileSizeInBytes} bytes)`);
+
+        res.status(200).json({
+            success: true,
+            message: 'Backup created successfully',
+            backup: {
+                uuid: backupUuid,
+                name: name,
+                filePath: `backups/${id}/${backupFileName}`,
+                size: fileSizeInBytes,
+                createdAt: new Date().toISOString()
+            }
+        });
+    } catch (error) {
+        console.error(`Error creating backup for container ${id}:`, error);
+        res.status(500).json({ error: `Failed to create backup: ${error instanceof Error ? error.message : 'Unknown error'}` });
+    }
+});
+
+router.post('/container/restore', async (req: Request, res: Response) => {
+    const { id, backupPath } = req.body;
+
+    if (!id) {
+        res.status(400).json({ error: 'Container ID is required.' });
+        return;
+    }
+
+    if (!backupPath) {
+        res.status(400).json({ error: 'Backup path is required.' });
+        return;
+    }
+
+    try {
+        const fullBackupPath = path.resolve(backupPath);
+
+        if (!fs.existsSync(fullBackupPath)) {
+            res.status(404).json({ error: 'Backup file not found.' });
+            return;
+        }
+
+        const volumePath = path.resolve(`volumes/${id}`);
+
+        try {
+            const container = docker.getContainer(id);
+            const containerInfo = await container.inspect().catch(() => null);
+            if (containerInfo && containerInfo.State.Running) {
+                console.log(`Stopping container ${id} for restore...`);
+                await stopContainer(id);
+            }
+        } catch (error) {
+            console.warn(`Could not stop container ${id}:`, error);
+        }
+
+        if (fs.existsSync(volumePath)) {
+            fs.rmSync(volumePath, { recursive: true, force: true });
+        }
+        fs.mkdirSync(volumePath, { recursive: true });
+
+        console.log(`Restoring backup from ${fullBackupPath} to ${volumePath}`);
+
+        await tar_extract({
+            file: fullBackupPath,
+            cwd: volumePath,
+        });
+
+        console.log(`Backup restored successfully to container ${id}`);
+
+        res.status(200).json({
+            success: true,
+            message: 'Backup restored successfully'
+        });
+    } catch (error) {
+        console.error(`Error restoring backup for container ${id}:`, error);
+        res.status(500).json({ error: `Failed to restore backup: ${error instanceof Error ? error.message : 'Unknown error'}` });
+    }
+});
+
+router.delete('/container/backup', async (req: Request, res: Response) => {
+    const { backupPath } = req.body;
+
+    if (!backupPath) {
+        res.status(400).json({ error: 'Backup path is required.' });
+        return;
+    }
+
+    try {
+        const fullBackupPath = path.resolve(backupPath);
+
+        if (!fs.existsSync(fullBackupPath)) {
+            res.status(404).json({ error: 'Backup file not found.' });
+            return;
+        }
+
+        fs.unlinkSync(fullBackupPath);
+        console.log(`Backup file deleted: ${fullBackupPath}`);
+
+        res.status(200).json({
+            success: true,
+            message: 'Backup deleted successfully'
+        });
+    } catch (error) {
+        console.error(`Error deleting backup:`, error);
+        res.status(500).json({ error: `Failed to delete backup: ${error instanceof Error ? error.message : 'Unknown error'}` });
+    }
+});
+
+router.get('/container/backup/download', async (req: Request, res: Response) => {
+    const { backupPath } = req.query;
+
+    if (!backupPath || typeof backupPath !== 'string') {
+        res.status(400).json({ error: 'Backup path is required.' });
+        return;
+    }
+
+    try {
+        const fullBackupPath = path.resolve(backupPath);
+
+        if (!fs.existsSync(fullBackupPath)) {
+            res.status(404).json({ error: 'Backup file not found.' });
+            return;
+        }
+
+        const fileName = path.basename(fullBackupPath);
+        res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+        res.setHeader('Content-Type', 'application/gzip');
+
+        const fileStream = fs.createReadStream(fullBackupPath);
+        fileStream.pipe(res);
+
+        fileStream.on('error', (error) => {
+            console.error('Error streaming backup file:', error);
+            if (!res.headersSent) {
+                res.status(500).json({ error: 'Failed to download backup file' });
+            }
+        });
+
+    } catch (error) {
+        console.error(`Error downloading backup:`, error);
+        res.status(500).json({ error: `Failed to download backup: ${error instanceof Error ? error.message : 'Unknown error'}` });
     }
 });
 

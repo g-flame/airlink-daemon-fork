@@ -15,6 +15,8 @@
   "license": "MIT",
   "description": "",
   "dependencies": {
+    "@types/tar": "^6.1.13",
+    "@types/uuid": "^10.0.0",
     "archiver": "^7.0.1",
     "axios": "^1.7.9",
     "body-parser": "^2.2.0",
@@ -28,6 +30,7 @@
     "glob": "^11.0.2",
     "minecraft-status": "^1.1.0",
     "os-utils": "^0.0.14",
+    "tar": "^7.4.3",
     "tsx": "^4.19.2"
   },
   "devDependencies": {
