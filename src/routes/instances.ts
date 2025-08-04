@@ -374,11 +374,22 @@ router.post('/container/backup', async (req: Request, res: Response) => {
 
         console.log(`Creating backup for container ${id} at ${backupPath}`);
 
-            await tar_create({
+        await tar_create({
             gzip: true,
             file: backupPath,
             cwd: volumePath,
-            }, ['.']);
+            filter: (filePath) => {
+                let normalizedPath = filePath.split(path.sep).join('/');
+                if (normalizedPath.startsWith('./')) {
+                    normalizedPath = normalizedPath.slice(2);
+                }
+                return !(
+                    normalizedPath === 'node_modules' ||
+                    normalizedPath.endsWith('/node_modules') ||
+                    normalizedPath.includes('/node_modules/')
+                );
+            }
+        }, ['.']);
 
         const stats = fs.statSync(backupPath);
         const fileSizeInBytes = stats.size;
