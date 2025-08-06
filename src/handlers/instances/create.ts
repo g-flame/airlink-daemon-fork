@@ -34,6 +34,11 @@ export const startContainer = async (
             return;
         }
 
+        const exposedPorts = Object.keys(portBindings).reduce((acc, port) => {
+            acc[port] = {};
+            return acc;
+        }, {} as Record<string, {}>);
+
         await docker.createContainer({
             name: id,
             Image: image,
@@ -42,9 +47,9 @@ export const startContainer = async (
                 Binds: [`${volumePath}:/app/data`],
                 PortBindings: portBindings,
                 Memory: Memory * 1024 * 1024,
-                CpuCount: Cpu,
-                NetworkMode: 'host'
+                CpuCount: Cpu
             },
+            ExposedPorts: exposedPorts,
             AttachStdout: true,
             AttachStderr: true,
             AttachStdin: true,
