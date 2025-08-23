@@ -10,17 +10,24 @@ const sanitizePath = async (base: string, relativePath: string): Promise<string>
     const fullPath = path.resolve(base, relativePath);
 
     if (!fullPath.startsWith(base)) {
-        throw new Error('Invalid path: Directory traversal is not allowed.');
+        throw new Error("Invalid path: Directory traversal is not allowed.");
     }
 
-    try {
-        const stats = await fs.lstat(fullPath);
-        if (stats.isSymbolicLink()) {
-            throw new Error('Invalid path: Symlinks are not allowed.');
-        }
-    } catch (err: any) {
-        if (err.code !== 'ENOENT') { // Ignore "file not found", because we're creating it later
-            throw err;
+    let currentPath = base;
+    const segments = path.relative(base, fullPath).split(path.sep);
+
+    for (const segment of segments) {
+        currentPath = path.join(currentPath, segment);
+
+        try {
+            const stats = await fs.lstat(currentPath);
+            if (stats.isSymbolicLink()) {
+                throw new Error(`Invalid path: Symlinks are not allowed (${currentPath}).`);
+            }
+        } catch (err: any) {
+            if (err.code !== "ENOENT") {
+                throw err;
+            }
         }
     }
 
