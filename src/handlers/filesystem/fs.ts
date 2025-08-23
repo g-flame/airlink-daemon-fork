@@ -15,7 +15,7 @@ export const sanitizePath = (
     base: string,
     relativePath: string
   ): { fd: number; resolvedPath: string } => {
-    const realBase = fsN.realpathSync(base); // base must exist
+    const realBase = fsN.realpathSync(base);
     const fullPath = path.join(base, relativePath);
   
     if (!fullPath.startsWith(base)) {
@@ -25,28 +25,23 @@ export const sanitizePath = (
     const basefd = fsN.openSync(realBase, fs.constants.O_RDONLY | fs.constants.O_DIRECTORY);
   
     try {
-      const fd = openAtAddon(
-        basefd,
-        relativePath,
-        fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW
-      );
+      const fd = fsN.existsSync(fullPath)
+        ? openAtAddon(basefd, relativePath, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW)
+        : -1;
   
-      let resolvedPath: string;
       const parent = path.dirname(fullPath);
-      const realParent = fsN.realpathSync(parent); // only resolve the parent directory
+      const realParent = fsN.realpathSync(parent);
   
-      resolvedPath = path.join(realParent, path.basename(fullPath));
-  
-      if (!resolvedPath.startsWith(realBase + path.sep) && resolvedPath !== realBase) {
+      if (!realParent.startsWith(realBase + path.sep) && realParent !== realBase) {
         throw new Error("Invalid path: escapes base directory");
       }
   
+      const resolvedPath = path.join(realParent, path.basename(fullPath));
       return { fd, resolvedPath };
     } finally {
       fsN.closeSync(basefd);
     }
   };
-
 const requestCache = new Map();
 
 const getDirectorySize = async (
