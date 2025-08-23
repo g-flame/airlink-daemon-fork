@@ -30,7 +30,6 @@ const sanitizePath = (base: string, relativePath: string): string => {
 
     return resolved;
 };
-
 const requestCache = new Map();
 
 const getDirectorySize = async (
