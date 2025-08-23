@@ -7,43 +7,61 @@ import fileSpecifier from '../../utils/fileSpecifier';
 import archiver from 'archiver';
 import { spawn } from 'child_process';
 
-const sanitizePath = (base: string, relativePath: string): string => {
-    const realBase = fsN.realpathSync(base);
+const secureOpen = require("../../../libs/build/Release/secure_open.node");
+const openAtAddon = secureOpen.openat;
+
+export const sanitizePath = (
+  base: string,
+  relativePath: string
+): { fd: number; resolvedPath: string } => {
+  // Step 1: canonicalize the base directory
+  const realBase = fsN.realpathSync(base);
+
+  if (path.isAbsolute(relativePath)) {
+    throw new Error("Invalid path: absolute paths are not allowed");
+  }
+
+  // Step 2: open the base directory securely
+  const basefd = fsN.openSync(realBase, fs.constants.O_RDONLY | fs.constants.O_DIRECTORY);
+
+  try {
+    // Step 3: open the target file atomically relative to basefd
+    const fd = openAtAddon(
+      basefd,
+      relativePath,
+      fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW
+    );
+
+    // Step 4: resolve the canonical path for optional use
+    let resolvedPath: string;
     const joined = path.join(realBase, relativePath);
-
-    let resolved: string;
     try {
-        resolved = fsN.realpathSync(joined);
+      resolvedPath = fsN.realpathSync(joined);
     } catch (err: any) {
-        if (err.code === "ENOENT") {
-            const parent = path.dirname(joined);
-            const realParent = fsN.realpathSync(parent);
+      if (err.code === "ENOENT") {
+        // File doesn't exist yet; resolve parent directory safely
+        const parent = path.dirname(joined);
+        const realParent = fsN.realpathSync(parent);
 
-            if (!realParent.startsWith(realBase + path.sep) && realParent !== realBase) {
-                throw new Error("Invalid path: escapes base directory.");
-            }
-
-            resolved = path.join(realParent, path.basename(joined));
-        } else {
-            throw err;
+        if (!realParent.startsWith(realBase + path.sep) && realParent !== realBase) {
+          throw new Error("Invalid path: escapes base directory");
         }
+
+        resolvedPath = path.join(realParent, path.basename(joined));
+      } else {
+        throw err;
+      }
     }
 
-    if (!resolved.startsWith(realBase + path.sep) && resolved !== realBase) {
-        throw new Error("Invalid path: escapes base directory.");
+    // Step 5: final containment check (optional, extra safety)
+    if (!resolvedPath.startsWith(realBase + path.sep) && resolvedPath !== realBase) {
+      throw new Error("Invalid path: escapes base directory");
     }
 
-    try {
-        const fd = fsN.openSync(resolved, fsN.constants.O_RDONLY | fsN.constants.O_NOFOLLOW);
-        fsN.closeSync(fd);
-    } catch (err: any) {
-        if (err.code === "ELOOP") {
-            throw new Error(`Invalid path: symlink not allowed (${resolved})`);
-        }
-        if (err.code !== "ENOENT") throw err;
-    }
-
-    return resolved;
+    return { fd, resolvedPath };
+  } finally {
+    fsN.closeSync(basefd); // close the trusted base directory
+  }
 };
 
 const requestCache = new Map();
@@ -122,8 +140,8 @@ const getFileContent = async (filePath: string): Promise<string | null> => {
 const afs = {
     async rename(id: string, oldPath: string, newPath: string) {
         const baseDirectory = path.resolve(`volumes/${id}`);
-        const oldFilePath = sanitizePath(baseDirectory, oldPath);
-        const newFilePath = sanitizePath(baseDirectory, newPath);
+        const oldFilePath = sanitizePath(baseDirectory, oldPath).resolvedPath;
+        const newFilePath = sanitizePath(baseDirectory, newPath).resolvedPath;
 
         const newFileDir = path.dirname(newFilePath);
         if (!fsN.existsSync(newFileDir)) {
@@ -176,7 +194,7 @@ const afs = {
 
         try {
             const baseDirectory = path.resolve(`volumes/${id}`);
-            const targetDirectory = sanitizePath(baseDirectory, relativePath);
+            const targetDirectory = sanitizePath(baseDirectory, relativePath).resolvedPath;
             const directoryContents = await fs.readdir(targetDirectory, { withFileTypes: true });
             const results = await Promise.all(directoryContents.map(async dirent => {
                 const ext = path.extname(dirent.name).substring(1);
@@ -219,13 +237,13 @@ const afs = {
 
     async getFilePath(id: string, relativePath: string = '/') {
         const baseDirectory = path.resolve(`volumes/${id}`);
-        return sanitizePath(baseDirectory, relativePath);
+        return sanitizePath(baseDirectory, relativePath).resolvedPath;
     },
 
     async getFileSizeHandler(id: string, relativePath: string = '/'): Promise<number> {
         try {
             const baseDirectory = path.resolve(`volumes/${id}`);
-            const filePath = sanitizePath(baseDirectory, relativePath);
+            const filePath = sanitizePath(baseDirectory, relativePath).resolvedPath;
             return await getFileSize(filePath);
         } catch (error: unknown) {
             if (error instanceof Error) {
@@ -239,7 +257,7 @@ const afs = {
     async getDirectorySizeHandler(id: string, relativePath: string = '/'): Promise<number> {
         try {
             const baseDirectory = path.resolve(`volumes/${id}`);
-            const dirPath = sanitizePath(baseDirectory, relativePath);
+            const dirPath = sanitizePath(baseDirectory, relativePath).resolvedPath;
             return await getDirectorySize(dirPath);
         } catch (error: unknown) {
             if (error instanceof Error) {
@@ -253,7 +271,7 @@ const afs = {
     async getFileContentHandler(id: string, relativePath: string = '/'): Promise<string | null> {
         try {
             const baseDirectory = path.resolve(`volumes/${id}`);
-            const filePath = sanitizePath(baseDirectory, relativePath);
+            const filePath = sanitizePath(baseDirectory, relativePath).resolvedPath;
             return await getFileContent(filePath);
         } catch (error: unknown) {
             if (error instanceof Error) {
@@ -267,7 +285,7 @@ const afs = {
     async copy(id: string, sourcePath: string, destinationPath: string, fileName: string): Promise<void> {
         const baseDirectory = path.resolve(`volumes/${id}`);
         const src = sourcePath;
-        const dest = sanitizePath(baseDirectory, destinationPath + fileName);
+        const dest = sanitizePath(baseDirectory, destinationPath + fileName).resolvedPath;
 
         const stat = await fs.lstat(src);
 
@@ -287,13 +305,13 @@ const afs = {
 
     getDownloadPath(id: string, relativePath: string = '/'): string {
         const baseDirectory = path.resolve(`volumes/${id}`);
-        return sanitizePath(baseDirectory, relativePath);
+        return sanitizePath(baseDirectory, relativePath).resolvedPath;
     },
 
     async writeFileContentHandler(id: string, relativePath: string, content: string | Buffer): Promise<void> {
         try {
             const baseDirectory = path.resolve(`volumes/${id}`);
-            const filePath = sanitizePath(baseDirectory, relativePath);
+            const filePath = sanitizePath(baseDirectory, relativePath).resolvedPath;
             const dir = path.dirname(filePath);
 
             console.log(`Writing file to ${filePath}, content type: ${typeof content}`);
@@ -319,7 +337,7 @@ const afs = {
     async rm(id: string, relativePath: string): Promise<void> {
         try {
             const baseDirectory = path.resolve(`volumes/${id}`);
-            const targetPath = sanitizePath(baseDirectory, relativePath);
+            const targetPath = sanitizePath(baseDirectory, relativePath).resolvedPath;
 
             const stat = await fs.lstat(targetPath);
 
@@ -346,7 +364,7 @@ const afs = {
     async download(id: string, url: string, relativePath: string, environmentVariables?: Record<string, string>): Promise<void> {
         try {
             const baseDirectory = path.resolve(`volumes/${id}`);
-            const filePath = sanitizePath(baseDirectory, relativePath);
+            const filePath = sanitizePath(baseDirectory, relativePath).resolvedPath;
 
             const response = await axios({
                 method: 'GET',
