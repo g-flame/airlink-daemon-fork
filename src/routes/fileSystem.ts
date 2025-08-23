@@ -285,6 +285,7 @@ router.post('/fs/rename', async (req: Request, res: Response) => {
         res.json({ message: 'File successfully renamed.' });
     } catch (error) {
         if (error instanceof Error) {
+            console.log(error.message);
             res.status(500).json({ error: error.message });
         } else {
             res.status(500).json({ error: 'An unknown error occurred.' });
