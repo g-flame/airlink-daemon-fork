@@ -7,14 +7,15 @@ import { validateContainerId, validatePath, validateFileName } from '../utils/va
 const router = Router();
 
 const sanitizePath = async (base: string, relativePath: string): Promise<string> => {
-    const fullPath = path.resolve(base, relativePath);
+    const fullPath = path.join(base, relativePath);
 
+    const relative = path.relative(base, fullPath);
     if (!fullPath.startsWith(base)) {
-        throw new Error("Invalid path: Directory traversal is not allowed.");
+        throw new Error('Invalid path: Directory traversal is not allowed.');
     }
 
     let currentPath = base;
-    const segments = path.relative(base, fullPath).split(path.sep);
+    const segments = relative.split(path.sep).filter(Boolean);
 
     for (const segment of segments) {
         currentPath = path.join(currentPath, segment);

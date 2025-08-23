@@ -8,14 +8,15 @@ import archiver from 'archiver';
 import { spawn } from 'child_process';
 
 const sanitizePath = (base: string, relativePath: string): string => {
-    const fullPath = path.resolve(base, relativePath);
+    const fullPath = path.join(base, relativePath);
 
+    const relative = path.relative(base, fullPath);
     if (!fullPath.startsWith(base)) {
-        throw new Error("Invalid path: Directory traversal is not allowed.");
+        throw new Error('Invalid path: Directory traversal is not allowed.');
     }
 
     let currentPath = base;
-    const segments = path.relative(base, fullPath).split(path.sep);
+    const segments = relative.split(path.sep);
 
     for (const segment of segments) {
         currentPath = path.join(currentPath, segment);
@@ -26,14 +27,13 @@ const sanitizePath = (base: string, relativePath: string): string => {
                 throw new Error(`Invalid path: Symlinks are not allowed (${currentPath}).`);
             }
         } catch (err: any) {
-            if (err.code !== "ENOENT") {
-                throw err;
-            }
+            if (err.code !== "ENOENT") throw err;
         }
     }
 
     return fullPath;
 };
+
 
 const requestCache = new Map();
 
