@@ -16,30 +16,35 @@ export const sanitizePath = (
     relativePath: string
   ): { fd: number; resolvedPath: string } => {
     const realBase = fsN.realpathSync(base);
-    const joined = path.join(base, relativePath);
-    const parentDir = path.dirname(joined);
+    const fullPath = path.join(base, relativePath);
   
-    const realParent = fsN.realpathSync(parentDir);
-  
-    if (!realParent.startsWith(realBase + path.sep) && realParent !== realBase) {
-      throw new Error("Invalid path: escapes base directory");
+    if (!fullPath.startsWith(base)) {
+      throw new Error('Invalid path: Directory traversal is not allowed.');
     }
   
-    const resolvedPath = path.join(realParent, path.basename(joined));
+    const basefd = fsN.openSync(realBase, fs.constants.O_RDONLY | fs.constants.O_DIRECTORY);
   
-    let fd = -1;
-    if (fsN.existsSync(resolvedPath)) {
-      const basefd = fsN.openSync(realBase, fs.constants.O_RDONLY | fs.constants.O_DIRECTORY);
-      try {
-        fd = openAtAddon(basefd, relativePath, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+    try {
+      const fd = fsN.existsSync(fullPath)
+        ? openAtAddon(basefd, relativePath, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW)
+        : -1;
+  
+        let resolvedPath: string;
+        const parent = path.dirname(fullPath);
+        const realParent = fsN.realpathSync(parent);
+    
+        resolvedPath = path.join(realParent, path.basename(fullPath));
+    
+        if (!resolvedPath.startsWith(realBase + path.sep) && resolvedPath !== realBase) {
+          throw new Error("Invalid path: escapes base directory");
+        }
+    
+        return { fd, resolvedPath };
       } finally {
         fsN.closeSync(basefd);
       }
-    }
-  
-    return { fd, resolvedPath };
-  };
-
+    };
+    
 const requestCache = new Map();
 
 const getDirectorySize = async (
