@@ -136,37 +136,50 @@ const getFileContent = async (filePath: string): Promise<string | null> => {
 
 const afs = {
     async rename(id: string, oldPath: string, newPath: string) {
+        console.log(`[rename] Start renaming: ${oldPath} -> ${newPath} in volume: ${id}`);
         const baseDirectory = path.resolve(`volumes/${id}`);
+        console.log(`[rename] Base directory resolved: ${baseDirectory}`);
     
         const oldSanitized = sanitizePath(baseDirectory, oldPath);
         const newSanitized = sanitizePath(baseDirectory, newPath);
+        console.log(`[rename] Sanitized paths:`);
+        console.log(`  old: ${oldSanitized.resolvedPath} (fd: ${oldSanitized.fd})`);
+        console.log(`  new: ${newSanitized.resolvedPath} (fd: ${newSanitized.fd})`);
     
         const newFileDir = path.dirname(newSanitized.resolvedPath);
         if (!fsN.existsSync(newFileDir)) {
+            console.log(`[rename] Creating new directory: ${newFileDir}`);
             await fs.mkdir(newFileDir, { recursive: true });
         }
     
         const isFile = fsN.lstatSync(oldSanitized.resolvedPath).isFile();
+        console.log(`[rename] Is file: ${isFile}`);
     
         if (fsN.existsSync(newSanitized.resolvedPath)) {
+            console.error(`[rename] Target already exists: ${newSanitized.resolvedPath}`);
             throw new Error(isFile ? 'File already exists' : 'Folder already exists');
         }
     
         const oldParentFD = fsN.openSync(path.dirname(oldSanitized.resolvedPath), fsN.constants.O_RDONLY | fsN.constants.O_DIRECTORY);
         const newParentFD = fsN.openSync(newFileDir, fsN.constants.O_RDONLY | fsN.constants.O_DIRECTORY);
+        console.log(`[rename] Opened parent FDs: old=${oldParentFD}, new=${newParentFD}`);
     
         try {
+            console.log(`[rename] Performing renameat...`);
             renameAtAddon.renameat(
                 oldParentFD,
                 path.basename(oldSanitized.resolvedPath),
                 newParentFD,
                 path.basename(newSanitized.resolvedPath)
             );
+            console.log(`[rename] Rename completed successfully.`);
         } finally {
             fsN.closeSync(oldParentFD);
             fsN.closeSync(newParentFD);
+            console.log(`[rename] Closed parent FDs.`);
         }
     },
+    
 
     async list(id: string, relativePath: string = '/', filter?: string) {
         const currentTime = Date.now();
