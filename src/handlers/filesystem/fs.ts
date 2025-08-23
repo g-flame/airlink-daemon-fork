@@ -12,54 +12,40 @@ const openAtAddon = require("../../../libs/build/Release/secure_open.node").open
 const renameAtAddon = require('../../../libs/build/Release/rename_at.node').renameat;
 
 export const sanitizePath = (
-  base: string,
-  relativePath: string
-): { fd: number; resolvedPath: string } => {
-
-  const realBase = fsN.realpathSync(base);
-  const fullPath = path.join(base, relativePath);
-
+    base: string,
+    relativePath: string
+  ): { fd: number; resolvedPath: string } => {
+    const realBase = fsN.realpathSync(base); // base must exist
+    const fullPath = path.join(base, relativePath);
+  
     if (!fullPath.startsWith(base)) {
-        throw new Error('Invalid path: Directory traversal is not allowed.');
+      throw new Error('Invalid path: Directory traversal is not allowed.');
     }
-
-  const basefd = fsN.openSync(realBase, fs.constants.O_RDONLY | fs.constants.O_DIRECTORY);
-
-  try {
-    const fd = openAtAddon(
-      basefd,
-      relativePath,
-      fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW
-    );
-
-    let resolvedPath: string;
-    const joined = path.join(realBase, relativePath);
+  
+    const basefd = fsN.openSync(realBase, fs.constants.O_RDONLY | fs.constants.O_DIRECTORY);
+  
     try {
-      resolvedPath = fsN.realpathSync(joined);
-    } catch (err: any) {
-      if (err.code === "ENOENT") {
-        const parent = path.dirname(joined);
-        const realParent = fsN.realpathSync(parent);
-
-        if (!realParent.startsWith(realBase + path.sep) && realParent !== realBase) {
-          throw new Error("Invalid path: escapes base directory");
-        }
-
-        resolvedPath = path.join(realParent, path.basename(joined));
-      } else {
-        throw err;
+      const fd = openAtAddon(
+        basefd,
+        relativePath,
+        fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW
+      );
+  
+      let resolvedPath: string;
+      const parent = path.dirname(fullPath);
+      const realParent = fsN.realpathSync(parent); // only resolve the parent directory
+  
+      resolvedPath = path.join(realParent, path.basename(fullPath));
+  
+      if (!resolvedPath.startsWith(realBase + path.sep) && resolvedPath !== realBase) {
+        throw new Error("Invalid path: escapes base directory");
       }
+  
+      return { fd, resolvedPath };
+    } finally {
+      fsN.closeSync(basefd);
     }
-
-    if (!resolvedPath.startsWith(realBase + path.sep) && resolvedPath !== realBase) {
-      throw new Error("Invalid path: escapes base directory");
-    }
-
-    return { fd, resolvedPath };
-  } finally {
-    fsN.closeSync(basefd);
-  }
-};
+  };
 
 const requestCache = new Map();
 
