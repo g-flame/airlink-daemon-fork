@@ -7,9 +7,9 @@ import fileSpecifier from '../../utils/fileSpecifier';
 import archiver from 'archiver';
 import { spawn } from 'child_process';
 
-
 const sanitizePath = (base: string, relativePath: string): string => {
-    const joined = path.join(base, relativePath);
+    const realBase = fsN.realpathSync(base);
+    const joined = path.join(realBase, relativePath);
 
     let resolved: string;
     try {
@@ -18,18 +18,34 @@ const sanitizePath = (base: string, relativePath: string): string => {
         if (err.code === "ENOENT") {
             const parent = path.dirname(joined);
             const realParent = fsN.realpathSync(parent);
+
+            if (!realParent.startsWith(realBase + path.sep) && realParent !== realBase) {
+                throw new Error("Invalid path: escapes base directory.");
+            }
+
             resolved = path.join(realParent, path.basename(joined));
         } else {
             throw err;
         }
     }
 
-    if (!resolved.startsWith(base + path.sep) && resolved !== base) {
+    if (!resolved.startsWith(realBase + path.sep) && resolved !== realBase) {
         throw new Error("Invalid path: escapes base directory.");
+    }
+
+    try {
+        const fd = fsN.openSync(resolved, fsN.constants.O_RDONLY | fsN.constants.O_NOFOLLOW);
+        fsN.closeSync(fd);
+    } catch (err: any) {
+        if (err.code === "ELOOP") {
+            throw new Error(`Invalid path: symlink not allowed (${resolved})`);
+        }
+        if (err.code !== "ENOENT") throw err;
     }
 
     return resolved;
 };
+
 const requestCache = new Map();
 
 const getDirectorySize = async (
