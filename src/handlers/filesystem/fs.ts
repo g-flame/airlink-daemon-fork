@@ -9,7 +9,7 @@ import { spawn } from 'child_process';
 
 const openAtAddon = require("../../../libs/build/Release/secure_open.node").openat;
 
-const renameAtAddon = require('../../../libs/build/Release/rename_at.node').renameat;
+const renameAtAddon = require('../../../libs/build/Release/rename_at.node');
 
 export const sanitizePath = (
     base: string,
