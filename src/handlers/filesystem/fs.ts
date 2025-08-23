@@ -7,33 +7,29 @@ import fileSpecifier from '../../utils/fileSpecifier';
 import archiver from 'archiver';
 import { spawn } from 'child_process';
 
+
 const sanitizePath = (base: string, relativePath: string): string => {
-    const fullPath = path.join(base, relativePath);
+    const joined = path.join(base, relativePath);
 
-    const relative = path.relative(base, fullPath);
-    if (!fullPath.startsWith(base)) {
-        throw new Error('Invalid path: Directory traversal is not allowed.');
-    }
-
-    let currentPath = base;
-    const segments = relative.split(path.sep);
-
-    for (const segment of segments) {
-        currentPath = path.join(currentPath, segment);
-
-        try {
-            const stats = fsN.lstatSync(currentPath);
-            if (stats.isSymbolicLink()) {
-                throw new Error(`Invalid path: Symlinks are not allowed (${currentPath}).`);
-            }
-        } catch (err: any) {
-            if (err.code !== "ENOENT") throw err;
+    let resolved: string;
+    try {
+        resolved = fsN.realpathSync(joined);
+    } catch (err: any) {
+        if (err.code === "ENOENT") {
+            const parent = path.dirname(joined);
+            const realParent = fsN.realpathSync(parent);
+            resolved = path.join(realParent, path.basename(joined));
+        } else {
+            throw err;
         }
     }
 
-    return fullPath;
-};
+    if (!resolved.startsWith(base + path.sep) && resolved !== base) {
+        throw new Error("Invalid path: escapes base directory.");
+    }
 
+    return resolved;
+};
 
 const requestCache = new Map();
 
