@@ -14,32 +14,29 @@ export const sanitizePath = (
   base: string,
   relativePath: string
 ): { fd: number; resolvedPath: string } => {
-  // Step 1: canonicalize the base directory
+
   const realBase = fsN.realpathSync(base);
+  const fullPath = path.join(base, relativePath);
 
-  if (path.isAbsolute(relativePath)) {
-    throw new Error("Invalid path: absolute paths are not allowed");
-  }
+    if (!fullPath.startsWith(base)) {
+        throw new Error('Invalid path: Directory traversal is not allowed.');
+    }
 
-  // Step 2: open the base directory securely
   const basefd = fsN.openSync(realBase, fs.constants.O_RDONLY | fs.constants.O_DIRECTORY);
 
   try {
-    // Step 3: open the target file atomically relative to basefd
     const fd = openAtAddon(
       basefd,
       relativePath,
       fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW
     );
 
-    // Step 4: resolve the canonical path for optional use
     let resolvedPath: string;
     const joined = path.join(realBase, relativePath);
     try {
       resolvedPath = fsN.realpathSync(joined);
     } catch (err: any) {
       if (err.code === "ENOENT") {
-        // File doesn't exist yet; resolve parent directory safely
         const parent = path.dirname(joined);
         const realParent = fsN.realpathSync(parent);
 
@@ -53,14 +50,13 @@ export const sanitizePath = (
       }
     }
 
-    // Step 5: final containment check (optional, extra safety)
     if (!resolvedPath.startsWith(realBase + path.sep) && resolvedPath !== realBase) {
       throw new Error("Invalid path: escapes base directory");
     }
 
     return { fd, resolvedPath };
   } finally {
-    fsN.closeSync(basefd); // close the trusted base directory
+    fsN.closeSync(basefd);
   }
 };
 
