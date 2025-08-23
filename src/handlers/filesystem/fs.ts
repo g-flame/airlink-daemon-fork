@@ -44,7 +44,7 @@ export const sanitizePath = (
         fsN.closeSync(basefd);
       }
     };
-    
+
 const requestCache = new Map();
 
 const getDirectorySize = async (
@@ -119,81 +119,94 @@ const getFileContent = async (filePath: string): Promise<string | null> => {
 };
 
 const afs = {
-    async rename(id: string, oldPath: string, newPath: string) {
-        console.log(`[rename] Start renaming: ${oldPath} -> ${newPath} in volume: ${id}`);
-        const baseDirectory = path.resolve(`volumes/${id}`);
-        console.log(`[rename] Base directory resolved: ${baseDirectory}`);
-    
-        let oldSanitized, newSanitized;
+async rename(id: string, oldPath: string, newPath: string) {
+    console.log(`[rename] Start renaming: ${oldPath} -> ${newPath} in volume: ${id}`);
+    const baseDirectory = path.resolve(`volumes/${id}`);
+    console.log(`[rename] Base directory resolved: ${baseDirectory}`);
+
+    let oldSanitized, newSanitized;
+    try {
+        const oldParent = path.dirname(oldPath);
+        const newParent = path.dirname(newPath);
+
+        const oldParentSanitized = sanitizePath(baseDirectory, oldParent);
+        const newParentSanitized = sanitizePath(baseDirectory, newParent);
+
+        oldSanitized = {
+            fd: oldParentSanitized.fd,
+            resolvedPath: path.join(oldParentSanitized.resolvedPath, path.basename(oldPath))
+        };
+        newSanitized = {
+            fd: newParentSanitized.fd,
+            resolvedPath: path.join(newParentSanitized.resolvedPath, path.basename(newPath))
+        };
+
+        console.log(`[rename] Sanitized paths:`);
+        console.log(`  old: ${oldSanitized.resolvedPath} (fd: ${oldSanitized.fd})`);
+        console.log(`  new: ${newSanitized.resolvedPath} (fd: ${newSanitized.fd})`);
+    } catch (err) {
+        console.error(`[rename] Error sanitizing paths:`, err);
+        throw err;
+    }
+
+    const newFileDir = path.dirname(newSanitized.resolvedPath);
+    try {
+        if (!fsN.existsSync(newFileDir)) {
+            console.log(`[rename] Creating new directory: ${newFileDir}`);
+            await fs.mkdir(newFileDir, { recursive: true });
+        }
+    } catch (err) {
+        console.error(`[rename] Failed to create new directory: ${newFileDir}`, err);
+        throw err;
+    }
+
+    let isFile: boolean;
+    try {
+        isFile = fsN.lstatSync(oldSanitized.resolvedPath).isFile();
+        console.log(`[rename] Is file: ${isFile}`);
+    } catch (err) {
+        console.error(`[rename] Failed to lstat old path: ${oldSanitized.resolvedPath}`, err);
+        throw err;
+    }
+
+    if (fsN.existsSync(newSanitized.resolvedPath)) {
+        const msg = isFile ? 'File already exists' : 'Folder already exists';
+        console.error(`[rename] Target already exists: ${newSanitized.resolvedPath}`);
+        throw new Error(msg);
+    }
+
+    let oldParentFD, newParentFD;
+    try {
+        oldParentFD = fsN.openSync(path.dirname(oldSanitized.resolvedPath), fsN.constants.O_RDONLY | fsN.constants.O_DIRECTORY);
+        newParentFD = fsN.openSync(newFileDir, fsN.constants.O_RDONLY | fsN.constants.O_DIRECTORY);
+        console.log(`[rename] Opened parent FDs: old=${oldParentFD}, new=${newParentFD}`);
+    } catch (err) {
+        console.error(`[rename] Failed to open parent directories`, err);
+        throw err;
+    }
+
+    try {
+        console.log(`[rename] Performing renameat...`);
+        renameAtAddon.renameat(
+            oldParentFD,
+            path.basename(oldSanitized.resolvedPath),
+            newParentFD,
+            path.basename(newSanitized.resolvedPath)
+        );
+        console.log(`[rename] Rename completed successfully.`);
+    } catch (err) {
+        console.error(`[rename] renameat failed for: ${oldSanitized.resolvedPath} -> ${newSanitized.resolvedPath}`, err);
+        throw err;
+    } finally {
         try {
-            oldSanitized = sanitizePath(baseDirectory, oldPath);
-            newSanitized = sanitizePath(baseDirectory, newPath);
-            console.log(`[rename] Sanitized paths:`);
-            console.log(`  old: ${oldSanitized.resolvedPath} (fd: ${oldSanitized.fd})`);
-            console.log(`  new: ${newSanitized.resolvedPath} (fd: ${newSanitized.fd})`);
+            fsN.closeSync(oldParentFD);
+            fsN.closeSync(newParentFD);
+            console.log(`[rename] Closed parent FDs.`);
         } catch (err) {
-            console.error(`[rename] Error sanitizing paths:`, err);
-            throw err;
+            console.error(`[rename] Failed to close FDs`, err);
         }
-    
-        const newFileDir = path.dirname(newSanitized.resolvedPath);
-        try {
-            if (!fsN.existsSync(newFileDir)) {
-                console.log(`[rename] Creating new directory: ${newFileDir}`);
-                await fs.mkdir(newFileDir, { recursive: true });
-            }
-        } catch (err) {
-            console.error(`[rename] Failed to create new directory: ${newFileDir}`, err);
-            throw err;
-        }
-    
-        let isFile: boolean;
-        try {
-            isFile = fsN.lstatSync(oldSanitized.resolvedPath).isFile();
-            console.log(`[rename] Is file: ${isFile}`);
-        } catch (err) {
-            console.error(`[rename] Failed to lstat old path: ${oldSanitized.resolvedPath}`, err);
-            throw err;
-        }
-    
-        if (fsN.existsSync(newSanitized.resolvedPath)) {
-            const msg = isFile ? 'File already exists' : 'Folder already exists';
-            console.error(`[rename] Target already exists: ${newSanitized.resolvedPath}`);
-            throw new Error(msg);
-        }
-    
-        let oldParentFD, newParentFD;
-        try {
-            oldParentFD = fsN.openSync(path.dirname(oldSanitized.resolvedPath), fsN.constants.O_RDONLY | fsN.constants.O_DIRECTORY);
-            newParentFD = fsN.openSync(newFileDir, fsN.constants.O_RDONLY | fsN.constants.O_DIRECTORY);
-            console.log(`[rename] Opened parent FDs: old=${oldParentFD}, new=${newParentFD}`);
-        } catch (err) {
-            console.error(`[rename] Failed to open parent directories`, err);
-            throw err;
-        }
-    
-        try {
-            console.log(`[rename] Performing renameat...`);
-            renameAtAddon.renameat(
-                oldParentFD,
-                path.basename(oldSanitized.resolvedPath),
-                newParentFD,
-                path.basename(newSanitized.resolvedPath)
-            );
-            console.log(`[rename] Rename completed successfully.`);
-        } catch (err) {
-            console.error(`[rename] renameat failed for: ${oldSanitized.resolvedPath} -> ${newSanitized.resolvedPath}`, err);
-            throw err;
-        } finally {
-            try {
-                fsN.closeSync(oldParentFD);
-                fsN.closeSync(newParentFD);
-                console.log(`[rename] Closed parent FDs.`);
-            } catch (err) {
-                console.error(`[rename] Failed to close FDs`, err);
-            }
-        }
-    },    
+    }
+},  
 
     async list(id: string, relativePath: string = '/', filter?: string) {
         const currentTime = Date.now();
