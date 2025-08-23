@@ -7,8 +7,9 @@ import fileSpecifier from '../../utils/fileSpecifier';
 import archiver from 'archiver';
 import { spawn } from 'child_process';
 
-const secureOpen = require("../../../libs/build/Release/secure_open.node");
-const openAtAddon = secureOpen.openat;
+const openAtAddon = require("../../../libs/build/Release/secure_open.node").openat;
+
+const renameAtAddon = require('../../../libs/build/Release/rename_at.node').renameat;
 
 export const sanitizePath = (
   base: string,
@@ -136,25 +137,34 @@ const getFileContent = async (filePath: string): Promise<string | null> => {
 const afs = {
     async rename(id: string, oldPath: string, newPath: string) {
         const baseDirectory = path.resolve(`volumes/${id}`);
-        const oldFilePath = sanitizePath(baseDirectory, oldPath).resolvedPath;
-        const newFilePath = sanitizePath(baseDirectory, newPath).resolvedPath;
-
-        const newFileDir = path.dirname(newFilePath);
+    
+        const oldSanitized = sanitizePath(baseDirectory, oldPath);
+        const newSanitized = sanitizePath(baseDirectory, newPath);
+    
+        const newFileDir = path.dirname(newSanitized.resolvedPath);
         if (!fsN.existsSync(newFileDir)) {
             await fs.mkdir(newFileDir, { recursive: true });
         }
-
-        // if file rename file else if folder rename folder
-        if (fsN.lstatSync(oldFilePath).isFile()) {
-            if (fsN.existsSync(newFilePath)) {
-                throw new Error('File already exists');
-            }
-            await fs.rename(oldFilePath, newFilePath);
-        } else {
-            if (fsN.existsSync(newFilePath)) {
-                throw new Error('Folder already exists');
-            }
-            await fs.rename(oldFilePath, newFilePath);
+    
+        const isFile = fsN.lstatSync(oldSanitized.resolvedPath).isFile();
+    
+        if (fsN.existsSync(newSanitized.resolvedPath)) {
+            throw new Error(isFile ? 'File already exists' : 'Folder already exists');
+        }
+    
+        const oldParentFD = fsN.openSync(path.dirname(oldSanitized.resolvedPath), fsN.constants.O_RDONLY | fsN.constants.O_DIRECTORY);
+        const newParentFD = fsN.openSync(newFileDir, fsN.constants.O_RDONLY | fsN.constants.O_DIRECTORY);
+    
+        try {
+            renameAtAddon.renameat(
+                oldParentFD,
+                path.basename(oldSanitized.resolvedPath),
+                newParentFD,
+                path.basename(newSanitized.resolvedPath)
+            );
+        } finally {
+            fsN.closeSync(oldParentFD);
+            fsN.closeSync(newParentFD);
         }
     },
 
