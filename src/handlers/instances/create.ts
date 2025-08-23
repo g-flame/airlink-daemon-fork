@@ -44,10 +44,13 @@ export const startContainer = async (
             Image: image,
             Env: Object.entries(modifiedEnv).map(([key, value]) => `${key}=${value}`),
             HostConfig: {
-                Binds: [`${volumePath}:/app/data`],
-                PortBindings: portBindings,
-                Memory: Memory * 1024 * 1024,
-                CpuCount: Cpu
+            Binds: [`${volumePath}:/app/data`],
+            PortBindings: portBindings,
+            Memory: Memory * 1024 * 1024,
+            CpuCount: Cpu,
+            CapDrop: ["ALL"],
+            SecurityOpt: ["no-new-privileges:true"],
+            ReadonlyRootfs: true
             },
             ExposedPorts: exposedPorts,
             AttachStdout: true,
