@@ -469,7 +469,7 @@ async rename(id: string, oldPath: string, newPath: string) {
                 }));
 
             const firstFileDir = path.dirname(files[0].fullPath);
-            const zipPath = path.join(firstFileDir, `${zipname}.zip`);
+            const zipPath = path.join(baseDirectory, `${zipname}.zip`);
 
             await fs.mkdir(path.dirname(zipPath), { recursive: true });
 
